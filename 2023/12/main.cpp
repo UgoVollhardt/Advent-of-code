@@ -11,60 +11,72 @@ enum spring { kOperational, kDamaged, kUnknown };
 
 typedef struct {
     std::vector<spring> springs;
-    std::vector<int> contiguous;
-    std::vector<int> contiguousInit;
+    std::vector<int> pattern;
 } Row;
 
 typedef std::vector<Row> Input;
 
 std::map<spring, char> stc = {{kOperational, '.'}, {kDamaged, '#'}, {kUnknown, '?'}};
 
-std::ostream& operator<<(std::ostream& os, const Row& dt) {
-    std::string ouput;
-    for (auto spring : dt.springs) {
-        if (spring == kOperational)
-            ouput += '.';
-        else if (spring == kDamaged)
-            ouput += '#';
-        else
-            ouput += '?';
-    }
-    ouput += " | ";
-    for (auto contig : dt.contiguous) {
-        ouput += std::to_string(contig) + ",";
-    }
-    ouput.pop_back();
-    return os << ouput;
-}
-
-long getSumArrangements(std::string fileName);
+long getSumArrangements(std::string fileName, bool unfolded);
 Input parseInput(std::string fileName);
 Row parseLine(std::string line);
-int getArrangements(Row row, int posMin, int posMax);
-bool isArrangementValid(Row initialRow, int pos);
-int getMinSpaceLasts(Row row);
-Row createArrangement(Row initialRow, int pos);
-int countContigous(Row row);
+bool doesMatch(Row row, int pos, int patternIndex, int boundary);
+bool doesMatchFirst(Row row, int pos, int patternIndex, int boundary);
+bool doesMatchLast(Row row, int pos, int patternIndex, int boundary);
+int getRightBoundary(std::vector<int> pattern, int pos);
+long sumPreviousRow(std::vector<long> patternRow, Row row, int springIndex, int patternIndex);
+int getFirstOfLine(std::vector<long> line);
 Row unfold(Row row);
 
 int main() {
     std::cout << "--Part 1--" << std::endl;
     auto start = std::chrono::high_resolution_clock::now();
-    std::cout << getSumArrangements("input") << std::endl;
+    std::cout << getSumArrangements("input", false) << std::endl;
     auto stop = std::chrono::high_resolution_clock::now();
     std::cout << "Elapsed time : "
               << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << "ms"
               << std::endl;
     std::cout << "--Part 2--" << std::endl;
+    start = std::chrono::high_resolution_clock::now();
+    std::cout << getSumArrangements("input", true) << std::endl;
+    stop = std::chrono::high_resolution_clock::now();
+    std::cout << "Elapsed time : "
+              << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << "ms"
+              << std::endl;
 }
 
-long getSumArrangements(std::string fileName) {
+long getSumArrangements(std::string fileName, bool unfolded) {
     long sum = 0;
     auto input = parseInput(fileName);
-    for (int i = 0; i < input.size(); ++i) {
-        int ars =
-            getArrangements(input[i], 0, input[i].springs.size() - getMinSpaceLasts(input[i]));
-        sum += ars;
+    for (auto row : input) {
+        if (unfolded) row = unfold(row);
+        row.springs.push_back(
+            kOperational);  // add a trailing '.' to facilitate later computation with boundaries
+        std::vector<std::vector<long>> dp(row.pattern.size(),
+                                          std::vector<long>(row.springs.size(), 0));
+        for (int i = 0; i < row.pattern.size(); ++i) {
+            int leftBondary = 0;
+            int rightBondary = row.springs.size() - getRightBoundary(row.pattern, i);
+            if (i != 0) {
+                leftBondary = getFirstOfLine(dp[i - 1]) + row.pattern[i - 1] + 1;
+            }
+            for (int j = leftBondary; j < rightBondary; ++j) {
+                if (i == 0) {
+                    dp[i][j] = doesMatchFirst(row, j, i, rightBondary);
+                } else if (i == row.pattern.size() - 1) {
+                    dp[i][j] = int(doesMatchLast(row, j, i, rightBondary)) *
+                               sumPreviousRow(dp[i - 1], row, j, i);
+                } else {
+                    dp[i][j] = int(doesMatch(row, j, i, rightBondary)) *
+                               sumPreviousRow(dp[i - 1], row, j, i);
+                }
+            }
+        }
+
+        for (auto weight : dp.back()) {
+            sum += weight;
+        }
     }
     return sum;
 }
@@ -96,79 +108,69 @@ Row parseLine(std::string line) {
             ouput.springs.push_back(kUnknown);
     }
     while (getline(stream, buffer, ',')) {
-        if (!buffer.empty()) ouput.contiguous.push_back(stoi(buffer));
+        if (!buffer.empty()) ouput.pattern.push_back(stoi(buffer));
     }
-    ouput.contiguousInit = ouput.contiguous;
     return ouput;
 }
 
-int getArrangements(Row row, int posMin, int posMax) {
-    long sum = 0;
-    for (int i = posMin; i < posMax; ++i) {
-        if (isArrangementValid(row, i)) {
-            auto newRow = createArrangement(row, i);
-            if (row.contiguous.size() > 1) {
-                sum += getArrangements(createArrangement(row, i), i + row.contiguous.front() + 1,
-                                       row.springs.size() - getMinSpaceLasts(newRow));
-            } else {
-                if (row.contiguousInit.size() == countContigous(newRow)) {
-                    sum++;
-                }
-            }
-        }
+bool doesMatch(Row row, int pos, int patternIndex, int boundary) {
+    auto springs = row.springs;
+    auto size = row.pattern[patternIndex];
+    if (pos + size >= boundary) return false;
+    if (pos > 0 && springs[pos - 1] == kDamaged) return false;
+    if (springs[pos + size] == kDamaged) return false;
+    for (int i = pos; i < pos + size; ++i) {
+        if (springs[i] == kOperational) return false;
     }
-    return sum;
-}
-
-bool isArrangementValid(Row row, int pos) {
-    if (pos + row.contiguous.front() - 1 >= row.springs.size()) return false;
-    for (int i = 0; i < row.contiguous.front(); ++i) {
-        if (row.springs[i + pos] == kOperational) {
-            return false;
-        }
-    }
-    if (pos > 0 && row.springs[pos - 1] == kDamaged) {
-        return false;
-    }
-    if (pos < row.springs.size() - 1 && (pos + row.contiguous.front() != row.springs.size()) &&
-        row.springs[pos + row.contiguous.front()] == kDamaged) {
-        return false;
-    }
-
     return true;
 }
 
-int getMinSpaceLasts(Row row) {
-    if (row.contiguous.size() <= 1) return 0;
+bool doesMatchFirst(Row row, int pos, int patternIndex, int boundary) {
+    for (int i = 0; i < pos; ++i) {
+        if (row.springs[i] == kDamaged) return false;
+    }
+    return doesMatch(row, pos, patternIndex, boundary);
+}
+
+bool doesMatchLast(Row row, int pos, int patternIndex, int boundary) {
+    auto springs = row.springs;
+    auto size = row.pattern[patternIndex];
+    for (int i = pos + size; i < springs.size(); ++i) {
+        if (springs[i] == kDamaged) return false;
+    }
+    return doesMatch(row, pos, patternIndex, boundary);
+}
+
+int getRightBoundary(std::vector<int> pattern, int pos) {
     int sum = 0;
-    for (int i = 1; i < row.contiguous.size(); ++i) {
-        sum += row.contiguous[i] + 1;
+    for (int i = pos + 1; i < pattern.size(); ++i) {
+        sum += pattern[i] + 1;
     }
     return sum;
 }
 
-Row createArrangement(Row initialRow, int pos) {
-    Row output = initialRow;
-    for (int i = 0; i < initialRow.contiguous.front(); ++i) {
-        output.springs[i + pos] = kDamaged;
-    }
-    output.contiguous.erase(output.contiguous.begin());
-    return output;
-}
+long sumPreviousRow(std::vector<long> patternRow, Row row, int springIndex, int patternIndex) {
+    long sum = 0;
+    bool damaged = false;
+    int count = 0;
+    int boundary = springIndex - row.pattern[patternIndex - 1];
 
-int countContigous(Row row) {
-    int sum = 0;
-    spring last = row.springs.front();
-    for (int i = 0; i < row.springs.size(); ++i) {
-        if (row.springs[i] != last && last == kDamaged) {
-            sum += 1;
+    for (int i = 0; i < boundary; ++i) {
+        bool flag = true;
+        if (patternRow[i] == 0) continue;
+        for (int j = i + row.pattern[patternIndex - 1]; j < springIndex - 1; ++j) {
+            if (row.springs[j] == kDamaged) flag = false;
         }
-        last = row.springs[i];
-    }
-    if (row.springs.back() == kDamaged) {
-        sum += 1;
+        sum += flag ? patternRow[i] : 0;
     }
     return sum;
+}
+
+int getFirstOfLine(std::vector<long> line) {
+    for (int i = 0; i < line.size(); ++i) {
+        if (line[i] != 0) return i;
+    }
+    return -1;
 }
 
 Row unfold(Row row) {
@@ -176,10 +178,7 @@ Row unfold(Row row) {
     for (int i = 0; i < 4; ++i) {
         ouput.springs.push_back(kUnknown);
         ouput.springs.insert(ouput.springs.end(), row.springs.begin(), row.springs.end());
-        ouput.contiguous.insert(ouput.contiguous.end(), row.contiguous.begin(),
-                                row.contiguous.end());
-        ouput.contiguousInit.insert(ouput.contiguousInit.end(), row.contiguousInit.begin(),
-                                    row.contiguousInit.end());
+        ouput.pattern.insert(ouput.pattern.end(), row.pattern.begin(), row.pattern.end());
     }
     return ouput;
 }
