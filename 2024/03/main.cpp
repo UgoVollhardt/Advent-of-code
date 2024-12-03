@@ -17,11 +17,12 @@ std::vector<Operation> parseOperation(std::string line);
 std::vector<int> extractValues(std::string operation_str, std::string type);
 size_t applyOperation(Operation op);
 size_t grayStar(Input input);
+size_t goldStar(Input input);
 
 int main(int, char *[]) {
     auto input = parseInput("input");
     std::cout << "res gray star : " << grayStar(input) << std::endl;
-    // std::cout << "res gold star : " << goldStar(input) << std::endl;
+    std::cout << "res gold star : " << goldStar(input) << std::endl;
 }
 
 Input parseInput(std::string fileName) {
@@ -43,24 +44,23 @@ Input parseInput(std::string fileName) {
 
 std::vector<Operation> parseOperation(std::string line) {
     std::vector<Operation> res;
-    std::regex mul_regex("mul\\((\\d{1,3}),(\\d{1,3})\\)");
+    std::regex mul_regex("mul\\((\\d{1,3}),(\\d{1,3})\\)|do\\(\\)|don't\\(\\)");
     auto words_begin = std::sregex_iterator(line.begin(), line.end(), mul_regex);
     auto words_end = std::sregex_iterator();
-    std::cout << "Found " << std::distance(words_begin, words_end) << " matchs" << std::endl;
 
     for (std::sregex_iterator i = words_begin; i != words_end; ++i) {
         std::smatch match = *i;
         std::string match_str = match.str();
-        std::cout << match_str << " ";
-        auto values = extractValues(match_str, "mul");
-        res.push_back({"mul", values[0], values[1]});
-    }
-    std::cout << std::endl;
 
-    for (auto elem : res) {
-        std::cout << elem.type << " " << elem.first << " " << elem.second << std::endl;
+        if (match_str[0] == 'm') {
+            auto values = extractValues(match_str, "mul");
+            res.push_back({"mul", values[0], values[1]});
+        } else if (match_str[0] == 'd' && match_str.size() == 7) {
+            res.push_back({"don't", 0, 0});
+        } else if (match_str[0] == 'd' && match_str.size() == 4) {
+            res.push_back({"do", 0, 0});
+        }
     }
-    std::cout << std::endl;
 
     return res;
 }
@@ -93,6 +93,24 @@ size_t grayStar(Input input) {
         auto operations = parseOperation(elem);
         for (auto op : operations) {
             res += applyOperation(op);
+        }
+    }
+    return res;
+}
+
+size_t goldStar(Input input) {
+    size_t res = 0;
+    bool flag = true;
+    for (auto elem : input) {
+        auto operations = parseOperation(elem);
+        for (auto op : operations) {
+            if (op.type == "don't") {
+                flag = false;
+            } else if (op.type == "do") {
+                flag = true;
+            } else if (flag) {
+                res += applyOperation(op);
+            }
         }
     }
     return res;
