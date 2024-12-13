@@ -5,14 +5,15 @@
 #include <iostream>
 #include <iterator>
 #include <list>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
 
 struct Pos2D {
-    int x;
-    int y;
+    size_t x;
+    size_t y;
 
     Pos2D operator+(Pos2D &other) { return Pos2D{x + other.x, y + other.y}; }
     bool operator==(const Pos2D &other) { return x == other.x && y == other.y; }
@@ -27,7 +28,7 @@ std::ostream &operator<<(std::ostream &os, Pos2D pos) {
     return os;
 }
 
-bool isEqual(double a, double b) { return std::fabs(a - b) < 0.000001; }
+bool isEqual(double a, double b) { return std::fabs(a - b) <= 0.00015; }
 
 struct Machine {
     Pos2D A;
@@ -45,21 +46,16 @@ size_t goldStar(Input input);
 
 int main(int, char *[]) {
     auto input = parseInput("input");
-    std::cout << "res gray star : " << grayStar(input) << std::endl;
-    // auto start = std::chrono::high_resolution_clock::now();
-    // std::cout << "res gold star : " << goldStar(input) << std::endl;
-    // auto stop = std::chrono::high_resolution_clock::now();
-    // std::cout << "Elapsed time : "
-    //           << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() <<
-    //           "ms"
-    //           << std::endl;
+    std::cout << input.size() << std::endl;
+    std::cout << std::numeric_limits<double>::max() << std::endl;
 
-    // for (auto machine : input) {
-    //     // std::cout << "Button A : " << machine.A << std::endl;
-    //     // std::cout << "Button B : " << machine.B << std::endl;
-    //     // std::cout << "Prize : " << machine.prize << std::endl;
-    //     computeCost(machine);
-    // }
+    std::cout << "res gray star : " << grayStar(input) << std::endl;
+    auto start = std::chrono::high_resolution_clock::now();
+    std::cout << "res gold star : " << goldStar(input) << std::endl;
+    auto stop = std::chrono::high_resolution_clock::now();
+    std::cout << "Elapsed time : "
+              << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << "ms"
+              << std::endl;
 }
 
 Input parseInput(std::string fileName) {
@@ -113,17 +109,14 @@ Input parseInput(std::string fileName) {
 
 size_t computeCost(Machine machine) {
     double x, y;
-    // int X, Y;
     size_t res = 0;
     x = (double(machine.prize.y) / double(machine.B.y) - double(machine.prize.x) / (machine.B.x)) /
         (double(machine.A.y) / double(machine.B.y) - double(machine.A.x) / (machine.B.x));
     y = (double(machine.prize.y) / double(machine.A.y) - double(machine.prize.x) / (machine.A.x)) /
         (double(machine.B.y) / double(machine.A.y) - double(machine.B.x) / (machine.A.x));
-    std::cout << "A: " << x << "|B: " << y << std::endl;
-    // X = int(machine.A.x * x) + machine.B.x * y;
-    if (isEqual(x, std::round(x)) && isEqual(y, std::round(y)) && x <= 100.0 && y <= 100.0) {
-        std::cout << "return " << x << "|" << y << std::endl;
-        return x * 3 + y;
+
+    if (isEqual(x, std::round(x)) && isEqual(y, std::round(y))) {
+        return std::round(x) * 3 + std::round(y);
     }
     return 0;
 }
@@ -131,6 +124,16 @@ size_t computeCost(Machine machine) {
 size_t grayStar(Input input) {
     size_t res = 0;
     for (auto machine : input) {
+        res += computeCost(machine);
+    }
+    return res;
+}
+
+size_t goldStar(Input input) {
+    size_t res = 0;
+    for (auto machine : input) {
+        machine.prize.y += 10000000000000;
+        machine.prize.x += 10000000000000;
         res += computeCost(machine);
     }
     return res;
