@@ -12,15 +12,29 @@ struct Pos2D {
     int y;
 
     Pos2D operator+(const Pos2D &other) { return Pos2D{x + other.x, y + other.y}; }
+    Pos2D operator-(const Pos2D &other) { return Pos2D{x - other.x, y - other.y}; }
     bool operator==(const Pos2D &other) const { return x == other.x && y == other.y; }
 
-    bool inbound(int maxWidth, int maxHeight, int minWidth = 0, int minHeight = 0) {
+    bool inbound(int maxWidth, int maxHeight, int minWidth = 0, int minHeight = 0) const {
         return x >= minWidth && x < maxWidth && y >= minHeight && y < maxHeight;
     }
 
     bool orthogonal(const Pos2D &other) const {
         return (x == other.y || x == -other.y) && (y == other.x || y == -other.x);
     }
+};
+
+typedef Pos2D Dir;
+
+struct Pos2DCompare {
+    bool operator()(const Pos2D &lhs, const Pos2D &rhs) const {
+        return lhs.x * 1000 + lhs.y < rhs.x * 1000 + rhs.y;
+    }
+};
+
+struct Config {
+    Pos2D pos;
+    Dir dir;
 };
 
 struct Reindeer {
@@ -34,16 +48,35 @@ std::ostream &operator<<(std::ostream &os, Pos2D pos) {
 }
 
 struct GraphNode {
-    Pos2D pos;
-    Pos2D orient;
-    int cost;
-    int indexPrevious;
+    std::map<Dir, int, Pos2DCompare> costs;
+    std::map<Dir, Pos2D, Pos2DCompare> previous;
 
-    bool operator>(const GraphNode &other) const { return cost > other.cost; }
-};
+    std::vector<Dir> costMinDir(const Dir src = Dir{0, 0}) {
+        int costRes = std::numeric_limits<int>::max();
+        std::vector<Dir> dirs;
+        for (auto cost : costs) {
+            int actualCost = 0;
+            if (src != Dir{0, 0}) {
+                if (cost.first == src)
+                    actualCost = cost.second;
+                else if (cost.first.orthogonal(src))
+                    actualCost = cost.second + 1000;
+                else
+                    actualCost = cost.second + 2000;
+            } else {
+                actualCost = cost.second;
+            }
 
-struct comp {
-    bool operator()(const GraphNode &a, const GraphNode &b) const { return a.cost < b.cost; }
+            if (actualCost < costRes) {
+                costRes = actualCost;
+                dirs.clear();
+                dirs.push_back(cost.first);
+            } else if (actualCost == costRes) {
+                dirs.push_back(cost.first);
+            }
+        }
+        return dirs;
+    }
 };
 
 struct Input {
@@ -54,37 +87,26 @@ struct Input {
 };
 
 Input parseInput(std::string fileName);
-GraphNode constructGraph(Input input);
+std::vector<std::vector<GraphNode>> constructGraph(Input input);
+std::vector<std::string> drawGraph(std::vector<std::vector<GraphNode>> graph, Pos2D exit,
+                                   Pos2D start);
 
-size_t grayStar(Input input);
-size_t goldStar(Input input);
+size_t grayStar(std::vector<std::vector<GraphNode>> graph, Pos2D exit);
+size_t goldStar(std::vector<std::string> imageGraph);
 
 int main(int, char *[]) {
+    auto start = std::chrono::high_resolution_clock::now();
     auto input = parseInput("input");
-    std::cout << "res gray star : " << grayStar(input) << std::endl;
-    // auto start = std::chrono::high_resolution_clock::now();
-    // std::cout << "res gold star : " << goldStar(input) << std::endl;
-    // auto stop = std::chrono::high_resolution_clock::now();
-    // std::cout << "Elapsed time : "
-    //           << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() <<
-    //           "ms"
-    //           << std::endl;
+    auto graph = constructGraph(input);
+    auto graphImage = drawGraph(graph, input.exit, input.reindeer.pos);
 
-    // for (int i = 0; i < input.map.size(); ++i) {
-    //     for (int j = 0; j < input.map[j].size(); ++j) {
-    //         Pos2D pos = Pos2D{j, i};
-    //         if (pos == input.exit) {
-    //             std::cout << "E";
-    //         } else if (pos == input.reindeer.pos) {
-    //             std::cout << "S";
-    //         } else if (input.map[i][j] == Input::empty) {
-    //             std::cout << ".";
-    //         } else {
-    //             std::cout << "#";
-    //         }
-    //     }
-    //     std::cout << std::endl;
-    // }
+    std::cout << "res gray star : " << grayStar(graph, input.exit) << std::endl;
+    std::cout << "res gold star : " << goldStar(graphImage) << std::endl;
+
+    auto stop = std::chrono::high_resolution_clock::now();
+    std::cout << "Elapsed time : "
+              << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << "ms"
+              << std::endl;
 }
 
 Input parseInput(std::string fileName) {
@@ -119,47 +141,94 @@ Input parseInput(std::string fileName) {
     return res;
 }
 
-GraphNode constructGraph(Input input) {
+std::vector<std::vector<GraphNode>> constructGraph(Input input) {
     std::vector<Pos2D> dirs{Pos2D{0, 1}, Pos2D{1, 0}, Pos2D{0, -1}, Pos2D{-1, 0}};
-    std::vector<std::vector<bool>> processedPos(input.map.size(),
-                                                std::vector<bool>(input.map[0].size(), false));
-    std::vector<GraphNode> graph;
+    std::vector<std::vector<GraphNode>> processedPos(
+        input.map.size(), std::vector<GraphNode>(input.map[0].size(), GraphNode()));
+
     int width = int(input.map[0].size());
     int height = int(input.map.size());
-    std::list<GraphNode> stack;
-    stack.push_back(GraphNode{input.reindeer.pos, input.reindeer.orient, 0, -1});
+    Pos2D newPos;
+
+    std::list<Config> stack;
+
+    stack.push_back({input.reindeer.pos, input.reindeer.orient});
 
     while (!stack.empty()) {
-        graph.push_back(stack.front());
-        stack.pop_front();
-        GraphNode &current = graph.back();
-        int indexCurrent = int(graph.size() - 1);
+        Config current = stack.back();
+        stack.pop_back();
 
         if (current.pos == input.exit) {
-            return current;
+            continue;
         }
 
         for (auto dir : dirs) {
-            Pos2D newPos = current.pos + dir;
-            if (newPos.inbound(width, height) && !processedPos[newPos.y][newPos.x] &&
-                input.map[newPos.y][newPos.x] == Input::empty) {
-                if (dir == current.orient) {
-                    stack.push_back(GraphNode{newPos, dir, current.cost + 1, indexCurrent});
-                } else if (current.orient.orthogonal(dir)) {
-                    stack.push_back(GraphNode{newPos, dir, current.cost + 1001, indexCurrent});
+            newPos = current.pos + dir;
+            if (newPos.inbound(width, height) && input.map[newPos.y][newPos.x] == Input::empty) {
+                int newCost = processedPos[current.pos.y][current.pos.x].costs[current.dir];
+                if (dir == current.dir) {
+                    newCost += 1;
+                } else if (current.dir.orthogonal(dir)) {
+                    newCost += 1001;
                 } else {
-                    stack.push_back(GraphNode{newPos, dir, current.cost + 2001, indexCurrent});
+                    newCost += 2001;
                 }
-                processedPos[newPos.y][newPos.x] = true;
+                if (processedPos[newPos.y][newPos.x].costs.contains(dir)) {
+                    if (processedPos[newPos.y][newPos.x].costs[dir] == newCost) {
+                        processedPos[newPos.y][newPos.x].previous[dir] = current.pos;
+                    } else if (processedPos[newPos.y][newPos.x].costs[dir] > newCost) {
+                        processedPos[newPos.y][newPos.x].costs[dir] = newCost;
+                        processedPos[newPos.y][newPos.x].previous[dir] = current.pos;
+                        stack.push_back({newPos, dir});
+                    }
+                } else {
+                    processedPos[newPos.y][newPos.x].costs[dir] = newCost;
+                    processedPos[newPos.y][newPos.x].previous[dir] = current.pos;
+                    stack.push_back({newPos, dir});
+                }
             }
         }
-
-        stack.sort([](const GraphNode &a, const GraphNode &b) { return a.cost < b.cost; });
     }
-    return GraphNode{Pos2D{0, 0}, Pos2D{0, 0}, -1, -1};
+    return processedPos;
 }
 
-size_t grayStar(Input input) {
-    auto graphNode = constructGraph(input);
-    return graphNode.cost;
+std::vector<std::string> drawGraph(std::vector<std::vector<GraphNode>> graph, Pos2D exit,
+                                   Pos2D start) {
+    std::vector<std::string> graphimage(graph.size(), std::string(graph[0].size(), '-'));
+    std::list<Config> stack;
+    Config current;
+    std::vector<Dir> dirs = graph[exit.y][exit.x].costMinDir();
+
+    for (auto dir : dirs) {
+        stack.push_back(Config{exit, dir});
+        while (!stack.empty()) {
+            current = stack.back();
+            stack.pop_back();
+            graphimage[current.pos.y][current.pos.x] = '0';
+            auto costminDirs = graph[current.pos.y][current.pos.x].costMinDir(current.dir);
+            for (auto dir : costminDirs) {
+                stack.push_back(Config(current.pos - dir, dir));
+            }
+        }
+    }
+    return graphimage;
+}
+
+size_t grayStar(std::vector<std::vector<GraphNode>> graph, Pos2D exit) {
+    auto graphNodeExit = graph[exit.y][exit.x];
+
+    return graphNodeExit.costs[graphNodeExit.costMinDir()[0]];
+}
+
+size_t goldStar(std::vector<std::string> imageGraph) {
+    size_t res = 0;
+
+    for (auto line : imageGraph) {
+        for (auto charact : line) {
+            if (charact == '0') {
+                res++;
+            }
+        }
+    }
+    return res - 1;
 }
